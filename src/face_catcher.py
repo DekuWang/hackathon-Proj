@@ -268,7 +268,6 @@ def db_update_name(id: int) -> None:
             break
         except Exception as e:
             print("Parse Error, retrying...")
-            counter += 1
             continue
     
     if LLM_dict is None:
