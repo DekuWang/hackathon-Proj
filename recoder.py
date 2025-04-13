@@ -14,7 +14,7 @@ OUTPUT_FILENAME = "output.wav"
 
 def rms(data):
     """Root mean square of audio buffer"""
-    audio_data = np.frombuffer(data, dtype=np.int16)
+    audio_data = np.frombuffer(data, dtype=np.int16).astype(np.float32)
     return np.sqrt(np.mean(audio_data**2))
 
 def record(output = OUTPUT_FILENAME):
@@ -37,8 +37,6 @@ def record(output = OUTPUT_FILENAME):
         while True:
             data = stream.read(CHUNK)
             volume = rms(data)
-            if volume > THRESHOLD:
-                print("started recording")
 
             if volume > THRESHOLD:
                 if not recording:

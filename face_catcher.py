@@ -18,7 +18,7 @@ if not os.path.exists("face_output"):
 test_img_people = cv.imread("test_people.jpg")
 
 # Load Pretrained Model
-FACE_DETECT = cv.CascadeClassifier("haarcascade_frontalface_alt_tree.xml")
+FACE_DETECT = cv.CascadeClassifier("pretrained_model\haarcascade_frontalface_default.xml")
 
 # Create a lock for the database connection
 db_lock = threading.Lock()
@@ -37,39 +37,41 @@ def connect_db():
     conn.commit()
     return conn, c
 
-def get_new_id(cursor):
-    """
-    Get new id for the face
-    """
-    cursor.execute("SELECT MAX(id) FROM faces")
-    max_id = cursor.fetchone()[0]
-    return max_id + 1 if max_id is not None else 0
-
 def crop_face(img: np.ndarray):
     """
     Crop the face from the image and return the cropped image and gray image
     """
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    img_y, img_x = gray.shape[:2]
-    face = FACE_DETECT.detectMultiScale(gray, minSize=[100,100])
-    if face is None or len(face) == 0:
+    faces = FACE_DETECT.detectMultiScale(
+        gray, 
+        scaleFactor = 1.1, 
+        minNeighbors = 5, 
+        minSize=[100, 100]
+        )
+    
+    if faces is None or len(faces) == 0:
         return None, None
     
-    for x,y,w,h in face:
-        end_x = img_x if x+w > img_x else x+w
-        end_y = img_y if y+h > img_y else y+h
-
-        crop_img = img[y:end_y, x:end_x]
-
-    return crop_img, gray[y:end_y, x:end_x]
+    largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
+    x, y, w, h = largest_face
+    img_y, img_x = img.shape[:2]
+    end_x = img_x if x+w > img_x else x+w
+    end_y = img_y if y+h > img_y else y+h
+    crop_img = img[y:end_y, x:end_x]
+    gray_face = gray[y:end_y, x:end_x]
+    return crop_img, gray_face
 
 def detect_face(img: np.ndarray):
-
+    """
+    return 0 = no face detected,
+    return 1 = face detected, 
+    return 2 = face detected, but not in DB
+    """
     conn, c = connect_db()
     recognizer = cv.face.LBPHFaceRecognizer.create()
     trainer_path = "trainer/trainer.yml"
 
-    if not os.path.exists("trainer/trainer.yml"):
+    if not os.path.exists(trainer_path):
         crop_and_import(img)
 
     try:
@@ -77,7 +79,7 @@ def detect_face(img: np.ndarray):
     except cv.error as e:
         print("[ERROR] Unable to read model:", e)
         conn.close()
-        return False
+        return 0
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     faces = FACE_DETECT.detectMultiScale(
@@ -87,55 +89,40 @@ def detect_face(img: np.ndarray):
         minSize=[100, 100]
         )
 
-    recognized = False
+    recognized = 0
     if faces is None or len(faces) == 0:
         conn.close()
-        return False
+        return 0
     
-    for x, y, w, h in faces:
-        cv.rectangle(img, (x,y), (x+w, y+h), color = (0, 0, 255), thickness = 2)
+    # get largest face
+    largest_face = max(faces, key=lambda rect: rect[2] * rect[3])
+    x, y, w, h = largest_face
 
-        try:
-            ids, confidence = recognizer.predict(gray[y:y+h, x:x+w])
-        except Exception as e:
-            print("[ERROR] Unable to predict face:", e)
-            continue
+    cv.rectangle(img, (x,y), (x+w, y+h), color = (0, 0, 255), thickness = 2)
 
-        if confidence < 60:
-            with db_lock:
-                c.execute(f"SELECT name, hobby FROM faces WHERE id = {ids}")
-                record = c.fetchone()
-            face_name = record[0] if record else "inDB, no Record"
+    try:
+        ids, confidence = recognizer.predict(gray[y:y+h, x:x+w])
+    except Exception as e:
+        print("[ERROR] Unable to predict face:", e)
+        conn.close()
+        return 0
 
-            if face_name == "unknown":
-                with db_lock:
-                    c.execute(f"UPDATE faces SET name = 'unknown' WHERE id = {ids}")
-                    conn.commit()
+    if confidence < 60:
+        with db_lock:
+            c.execute(f"SELECT name, hobby FROM faces WHERE id = {ids}")
+            record = c.fetchone()
+        face_name = record[0] if record else "inDB, no Record"
 
-            cv.putText(img, face_name, (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
-            cv.putText(img, str(confidence), (x + 10, y + 20), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
-            recognized = True
-        else:
-            cv.putText
-        
+        cv.putText(img, face_name, (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+        cv.putText(img, str(confidence), (x + 10, y + 20), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+        recognized = 1
+    else:
+        cv.putText(img, "Unknown", (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+        recognized = 2
+
     conn.close()
     return recognized
 
-
-    #         face_name = c.execute(f"SELECT name, hobby FROM faces WHERE id = {ids}").fetchone()
-    #         face_name = "inDB, no Record" if not face_name else face_name[0]
-
-    #         if face_name == "unknown":
-    #             # Update name in DB
-    #             c.execute(f"UPDATE faces SET name = 'unknown' WHERE id = {ids}")
-    #             conn.commit()
-    #         cv.putText(img, face_name, (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
-    #         cv.putText(img, str(confidence), (x + 10, y + 20), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
-    #     else:
-    #         cv.putText(img, "Unknown", (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
-    #         return False
-    
-    # return True
 
 def import_face(gray_img: np.ndarray, id: int):
     """
@@ -143,24 +130,25 @@ def import_face(gray_img: np.ndarray, id: int):
     And and int id for id
     """
     os.makedirs("trainer", exist_ok = True)
+    trainer_path = "trainer/trainer.yml"
     recognier = cv.face.LBPHFaceRecognizer.create()
 
-    if not os.path.isfile(r"trainer/trainer.yml"):
+    if not os.path.exists(trainer_path):
         recognier.train([gray_img], np.array([id]))
     else:
         try:
             print("yml exist")
-            recognier.read(r"trainer/trainer.yml")
+            recognier.read(trainer_path)
             recognier.update([gray_img], np.array([id]))
         except Exception as e:
             print(f"[ERROR] Failed to update model: {e}")
             return
     
     try:
-        recognier.write(r"trainer/trainer.yml")
+        recognier.write(trainer_path)
     except Exception as e:
         print(f"[ERROR] Failed to update model: {e}")
-
+        return
 
 def crop_and_import(img: np.ndarray):
     face, gray_face = crop_face(img)
@@ -170,31 +158,29 @@ def crop_and_import(img: np.ndarray):
         print("         No Output")
         return
     
-    c, conn = connect_db()
-
-    id = c.execute("SELECT MAX(id) FROM faces").fetchone()[0] + 1 if c.execute("SELECT MAX(id) FROM faces").fetchone()[0] is not None else 0
-    import_face(gray_img = gray_face, id = id)
+    conn, c = connect_db()
+    with db_lock:
+        c.execute(f"INSERT INTO faces (name, hobby) VALUES ('unknown', 'unknown')")
+        conn.commit()
+        new_id = c.lastrowid
+    
+    import_face(gray_img = gray_face, id = new_id)
     print("     Face Imported")
 
-    # Saving face to folder
-    output_path = os.path.join("face_output", str(id))
-    os.makedirs(output_path, exist_ok=True)
-    cv.imwrite(f"{output_path}/{datetime.now().strftime(r'%d%m%Y_%H%M%S')}.jpg", face)
+    conn.close()
 
-    # Saving id to DB
-    c.execute(f"INSERT INTO faces (name, hobby) VALUES ('unknown', 'unknown')")
-    conn.commit()
-
-    recoder_thread = threading.Thread(target = db_update_name, args = (id,))
+    recoder_thread = threading.Thread(target = db_update_name, args = (new_id,))
     recoder_thread.daemon = True
     recoder_thread.start()
 
-    print("face_added!")
+    print("     Face Added")
     return
 
 def db_update_name(id: int):
-    recoder.record(f"whoareyou_cache/{id}.wav")
-    for counter in range(5):
+    audio_file = os.path.join("whoareyou_cache", f"{id}.wav")
+    recoder.record(audio_file)
+    LLM_dict = None
+    for attempt in range(5):
         try:
             LLM_reply = LLM.get_name_hobby(USERNAME, f"whoareyou_cache/{id}.wav")
             LLM_dict = json.loads(LLM_reply)
@@ -203,18 +189,31 @@ def db_update_name(id: int):
             print("Parse Error, retrying...")
             counter += 1
             continue
+    
+    if LLM_dict is None:
+        print("Failed to parse LLM response")
+        return
 
     # DB for other thread
-    c, conn = connect_db()
-    c.execute(f"UPDATE faces SET name = '{LLM_dict['speaker']}', hobby = '{LLM_dict['hobby']}' WHERE id = {id}")
-    conn.commit()
+    conn, c = connect_db()
 
-    face_name = c.execute(f"SELECT name, hobby FROM faces WHERE id = {id}").fetchone()
-    print(str(face_name))
+    with db_lock:
+        c.execute(f"UPDATE faces SET name = '{LLM_dict['speaker']}', hobby = '{LLM_dict['hobby']}' WHERE id = {id}")
+        conn.commit()
+
+        c.execute(f"SELECT name, hobby FROM faces WHERE id = {id}")
+        face_record = c.fetchone()
     conn.close()
 
+    if face_record is None:
+        print("No record found")
+        return
+    else:
+        print(f"     Face Name: {face_record[0]}")
 
 if __name__ == "__main__":
-    test_person = cv.imread(r"face_output\0\12042025_115719.jpg")
-    crop_and_import(test_person)
+    test_person_path = os.path.join("face_output", "0", "12042025_115719.jpg")
+    if os.path.exists(test_person_path):
+        test_person = cv.imread(test_person_path)
+        crop_and_import(test_person)
     detect_face(test_img_people)
