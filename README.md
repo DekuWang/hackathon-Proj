@@ -5,9 +5,9 @@ Briefly, this project is a facial recognition program that will automatically re
 This project is inspired by a communication with my friend. I have some problem with matching other's name and face, and such problem keeps bothering me especially when I have to work within a large group. At the beginning of this semester, my friend told me that he is thinking about to start a business about AR glasses, and ask me for suggestions, and the first idea comes out with it is using CV technique to assist users remind other's name. This repository is a feasibility testing of that idea, since I don't have an AR glass, this program is running on a PC now. The program capture 
 
 ## Demo
-[![enrollment test](introduction\enrollment mode.mp4)]
+[![enrollment test](introduction\enrollment_mode.mp4)]
 
-[![recognize test](introduction\recognition mode.mp4)]
+[![recognize test](introduction\recognition_mode.mp4)]
 
 ## How to use it? 
 ### SetUp
