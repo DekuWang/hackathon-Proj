@@ -5,9 +5,11 @@ Briefly, this project is a facial recognition program that will automatically re
 This project is inspired by a communication with my friend. I have some problem with matching other's name and face, and such problem keeps bothering me especially when I have to work within a large group. At the beginning of this semester, my friend told me that he is thinking about to start a business about AR glasses, and ask me for suggestions, and the first idea comes out with it is using CV technique to assist users remind other's name. This repository is a feasibility testing of that idea, since I don't have an AR glass, this program is running on a PC now. The program capture 
 
 ## Demo
-[![enrollment test](introduction\enrollment_mode.mp4)]
+https://github.com/user-attachments/assets/d04a8bd1-f15e-463f-9abe-bfdbe399e259
 
-[![recognize test](introduction\recognition_mode.mp4)]
+
+https://github.com/user-attachments/assets/e822b3aa-8668-40db-903e-0c3897659187
+
 
 ## How to use it? 
 ### SetUp
@@ -57,4 +59,6 @@ This project is inspired by a communication with my friend. I have some problem 
     5. Enhance recorder function, currently this doesn't work well in noise environment
     6. Move to Cloud
     7. More friendly GUI (I have no experience with front end so that's why I'm using Terminal Here（；_ ；）)
+    8. Support Update Hobby once name is given
+    9. Support modify stored data manually
 
