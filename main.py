@@ -4,7 +4,6 @@ import os
 import config
 import numpy as np
 
-os.makedirs("whoareyou_cache", exist_ok=True)
 
 def main() -> None:
     """
@@ -99,6 +98,7 @@ def main() -> None:
         if cv.waitKey(1) == ord("q") or cv.waitKey(1) == ord("Q"):
             cap.release()
             cv.destroyAllWindows()
+            config.clean_up_audio()
             break
 
 

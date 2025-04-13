@@ -16,7 +16,7 @@ import threading
 
 
 # Load Pretrained Model
-FACE_DETECT = cv.CascadeClassifier(config.LBPH_MODEL)
+FACE_DETECT = cv.CascadeClassifier(config.LBPH_MODEL_PATH)
 
 # Create a lock for the database connection
 db_lock = threading.Lock()
@@ -31,7 +31,7 @@ def connect_db() -> tuple[sqlite3.Connection, sqlite3.Cursor]:
         - name: A text field to store the name of the individual.
         - hobby: A field to store the hobby of the individual (data type not explicitly specified).
     """
-    conn = sqlite3.connect("face.db", check_same_thread=False)
+    conn = sqlite3.connect(config.DB, check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS faces
                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,13 +99,12 @@ def detect_face(img: np.ndarray) -> tuple[int, str, int, str]:
     """
     conn, c = connect_db()
     recognizer = cv.face.LBPHFaceRecognizer.create(radius = 1, neighbors = 8, grid_x = 8, grid_y = 8)
-    trainer_path = "trainer/trainer.yml"
 
-    if not os.path.exists(trainer_path):
+    if not os.path.exists(config.TRAINER):
         model_initialization()
 
     try:
-        recognizer.read("trainer/trainer.yml")
+        recognizer.read(config.TRAINER)
     except cv.error as e:
         print("[ERROR] Unable to read model:", e)
         conn.close()
@@ -171,23 +170,21 @@ def import_face(gray_img: np.ndarray, id: int) -> None:
         - If the 'trainer.yml' file exists, the model is updated with the new face data.
         - Any errors during the training or saving process are logged to the console.
     """
-    os.makedirs("trainer", exist_ok = True)
-    trainer_path = "trainer/trainer.yml"
     recognier = cv.face.LBPHFaceRecognizer.create(radius = 1, neighbors = 8, grid_x = 8, grid_y = 8)
 
-    if not os.path.exists(trainer_path):
+    if not os.path.exists(config.TRAINER):
         recognier.train([gray_img], np.array([id]))
     else:
         try:
             print("yml exist")
-            recognier.read(trainer_path)
+            recognier.read(config.TRAINER)
             recognier.update([gray_img], np.array([id]))
         except Exception as e:
             print(f"[ERROR] Failed to update model: {e}")
             return
     
     try:
-        recognier.write(trainer_path)
+        recognier.write(config.TRAINER)
     except Exception as e:
         print(f"[ERROR] Failed to update model: {e}")
         return
@@ -251,7 +248,7 @@ def db_update_name(id: int) -> None:
     Raises:
         Exception: If there are issues with parsing the LLM response or database operations.
     Side Effects:
-        - Records an audio file and saves it in the "whoareyou_cache" directory.
+        - Records an audio file and saves it in the "data/audio" directory.
         - Updates the database with the name and hobby of the person.
         - Prints messages to the console for debugging and status updates.
         - Modifies global configuration flags (`config.MODE`, `config.IS_ENROLLMENT`, 
@@ -261,12 +258,12 @@ def db_update_name(id: int) -> None:
         - A database lock (`db_lock`) is used to ensure thread-safe operations.
         - If the database update is successful, the updated record is fetched and printed.
     """
-    audio_file = os.path.join("whoareyou_cache", f"{id}.wav")
+    audio_file = os.path.join(config.AUDIO_PATH, f"{id}.wav")
     recoder.record(audio_file)
     LLM_dict = None
     for attempt in range(5):
         try:
-            LLM_reply = LLM.get_name_hobby(config.USERNAME, f"whoareyou_cache/{id}.wav")
+            LLM_reply = LLM.get_name_hobby(config.USERNAME, audio_file)
             LLM_dict = json.loads(LLM_reply)
             break
         except Exception as e:
@@ -282,8 +279,12 @@ def db_update_name(id: int) -> None:
     conn, c = connect_db()
 
     with db_lock:
-        c.execute("UPDATE faces SET name = ?, hobby = ? WHERE id = ?", 
-          (LLM_dict['speaker'], LLM_dict['hobby'], id))
+        if LLM_dict['hobby'] == "unknown":
+            c.execute("UPDATE faces SET name = ? WHERE id = ?",
+                      (LLM_dict['speaker'], id))
+        else:
+            c.execute("UPDATE faces SET name = ?, hobby = ? WHERE id = ?", 
+            (LLM_dict['speaker'], LLM_dict['hobby'], id))
         conn.commit()
 
         c.execute(f"SELECT name, hobby FROM faces WHERE id = {id}")
@@ -334,7 +335,7 @@ def model_initialization() -> None:
     - Any exceptions related to file I/O, database connection, or SQL execution are not handled explicitly.
     """
     print("Model Initialization")
-    default_img = cv.imread("default.jpg")
+    default_img = cv.imread(config.DEFAULT_IMG)
     face, gray_face = crop_face(default_img)
     print("     Face Cropped")
     
