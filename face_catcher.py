@@ -18,37 +18,43 @@ if not os.path.exists("face_output"):
 test_img_people = cv.imread("test_people.jpg")
 
 # Load Pretrained Model
-FACE_DETECT = cv.CascadeClassifier("D:\OpenCV\opencv-4.11.0\data\haarcascades_cuda\haarcascade_frontalface_default.xml")
+FACE_DETECT = cv.CascadeClassifier("haarcascade_frontalface_alt_tree.xml")
 
-# Create Face DB, used in main thread
-conn = sqlite3.connect("face.db")
-c = conn.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS faces
-            (id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,                     
-            hobby NOT NULL)''')
-conn.commit()
+# Create a lock for the database connection
+db_lock = threading.Lock()
+
 
 def connect_db():
     """
     Conneect to DB, used by other threads
     """
-    conn = sqlite3.connect("face.db")
+    conn = sqlite3.connect("face.db", check_same_thread=False)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS faces
                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,                     
                 hobby NOT NULL)''')
     conn.commit()
-    return c, conn
+    return conn, c
+
+def get_new_id(cursor):
+    """
+    Get new id for the face
+    """
+    cursor.execute("SELECT MAX(id) FROM faces")
+    max_id = cursor.fetchone()[0]
+    return max_id + 1 if max_id is not None else 0
 
 def crop_face(img: np.ndarray):
     """
-    // TODO
+    Crop the face from the image and return the cropped image and gray image
     """
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
     img_y, img_x = gray.shape[:2]
     face = FACE_DETECT.detectMultiScale(gray, minSize=[100,100])
+    if face is None or len(face) == 0:
+        return None, None
+    
     for x,y,w,h in face:
         end_x = img_x if x+w > img_x else x+w
         end_y = img_y if y+h > img_y else y+h
@@ -58,30 +64,78 @@ def crop_face(img: np.ndarray):
     return crop_img, gray[y:end_y, x:end_x]
 
 def detect_face(img: np.ndarray):
+
+    conn, c = connect_db()
     recognizer = cv.face.LBPHFaceRecognizer.create()
+    trainer_path = "trainer/trainer.yml"
+
+    if not os.path.exists("trainer/trainer.yml"):
+        crop_and_import(img)
+
     try:
         recognizer.read("trainer/trainer.yml")
-    except Exception as e:
-        crop_and_import(img = img)
-        recognizer.read("trainer/trainer.yml")
+    except cv.error as e:
+        print("[ERROR] Unable to read model:", e)
+        conn.close()
+        return False
 
     gray = cv.cvtColor(img, cv.COLOR_BGR2GRAY)
-    face = FACE_DETECT.detectMultiScale(gray, minSize=[100,100])
+    faces = FACE_DETECT.detectMultiScale(
+        gray, 
+        scaleFactor = 1.1,
+        minNeighbors = 5,
+        minSize=[100, 100]
+        )
 
-    for x, y, w, h in face:
+    recognized = False
+    if faces is None or len(faces) == 0:
+        conn.close()
+        return False
+    
+    for x, y, w, h in faces:
         cv.rectangle(img, (x,y), (x+w, y+h), color = (0, 0, 255), thickness = 2)
 
-        ids, confidence = recognizer.predict(gray[y:y+h, x:x+w])
+        try:
+            ids, confidence = recognizer.predict(gray[y:y+h, x:x+w])
+        except Exception as e:
+            print("[ERROR] Unable to predict face:", e)
+            continue
 
-        if confidence < 80:
-            face_name = c.execute(f"SELECT name, hobby FROM faces WHERE id = {ids - 1}").fetchone()
-            face_name = "Unknown" if not face_name else face_name[1]
+        if confidence < 60:
+            with db_lock:
+                c.execute(f"SELECT name, hobby FROM faces WHERE id = {ids}")
+                record = c.fetchone()
+            face_name = record[0] if record else "inDB, no Record"
+
+            if face_name == "unknown":
+                with db_lock:
+                    c.execute(f"UPDATE faces SET name = 'unknown' WHERE id = {ids}")
+                    conn.commit()
+
             cv.putText(img, face_name, (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+            cv.putText(img, str(confidence), (x + 10, y + 20), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+            recognized = True
         else:
-            cv.putText(img, "Unknown", (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
-            return False
+            cv.putText
+        
+    conn.close()
+    return recognized
+
+
+    #         face_name = c.execute(f"SELECT name, hobby FROM faces WHERE id = {ids}").fetchone()
+    #         face_name = "inDB, no Record" if not face_name else face_name[0]
+
+    #         if face_name == "unknown":
+    #             # Update name in DB
+    #             c.execute(f"UPDATE faces SET name = 'unknown' WHERE id = {ids}")
+    #             conn.commit()
+    #         cv.putText(img, face_name, (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+    #         cv.putText(img, str(confidence), (x + 10, y + 20), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+    #     else:
+    #         cv.putText(img, "Unknown", (x + 10, y - 10), cv.FONT_HERSHEY_COMPLEX, 0.75, (0,0,255), 1)
+    #         return False
     
-    return True
+    # return True
 
 def import_face(gray_img: np.ndarray, id: int):
     """
@@ -131,31 +185,33 @@ def crop_and_import(img: np.ndarray):
     c.execute(f"INSERT INTO faces (name, hobby) VALUES ('unknown', 'unknown')")
     conn.commit()
 
-    threading.Thread(target = db_update_name, args = (id,)).start()
+    recoder_thread = threading.Thread(target = db_update_name, args = (id,))
+    recoder_thread.daemon = True
+    recoder_thread.start()
 
     print("face_added!")
     return
 
 def db_update_name(id: int):
-    recoder.listen(f"whoareyou_cache/{id}.wav")
-    while True:
+    recoder.record(f"whoareyou_cache/{id}.wav")
+    for counter in range(5):
         try:
             LLM_reply = LLM.get_name_hobby(USERNAME, f"whoareyou_cache/{id}.wav")
             LLM_dict = json.loads(LLM_reply)
             break
         except Exception as e:
             print("Parse Error, retrying...")
+            counter += 1
             continue
 
     # DB for other thread
     c, conn = connect_db()
-
     c.execute(f"UPDATE faces SET name = '{LLM_dict['speaker']}', hobby = '{LLM_dict['hobby']}' WHERE id = {id}")
     conn.commit()
 
-    
-
-
+    face_name = c.execute(f"SELECT name, hobby FROM faces WHERE id = {id}").fetchone()
+    print(str(face_name))
+    conn.close()
 
 
 if __name__ == "__main__":

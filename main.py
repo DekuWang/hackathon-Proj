@@ -28,13 +28,18 @@ def main():
             unknown_counter += 1
         elif (not face_in_db) and unknown_counter >= 100:
             print("Unknown_counter = 0")
-            threading.Thread(target = face_catcher.crop_and_import, args = (frame,)).start()
+            t1 = threading.Thread(target = face_catcher.crop_and_import, args = (frame,))
+            t1.daemon = True
+            t1.start()
             unknown_counter = 0
 
         cv.imshow("test", frame)
 
         if cv.waitKey(1) == ord("q"):
+            cap.release()
+            cv.destroyAllWindows()
             break
+
 
 if __name__ == "__main__":
     main()
