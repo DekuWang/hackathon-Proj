@@ -1,9 +1,6 @@
 from openai import OpenAI
-from json import loads, dumps
+from config import API_KEY
 
-API_KEY = """
-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
-""".strip()
 
 GET_NAME_PROMPT = """
         You will receive a transcript from a conversation between two people and your mission is to extract the speaker's name and try to find out their hobby based on the conversation.
@@ -57,10 +54,3 @@ def get_name_hobby(username: str, sound_file: str):
     )
     print(response.output_text)
     return response.output_text
-
-if __name__  == "__main__":
-    LLM_reply = get_name_hobby("Bo Zhang", r"whoareyou_cache\2.wav")
-    print(LLM_reply)
-
-    print(loads(LLM_reply)["speaker"])
-    print(loads(LLM_reply)["hobby"])

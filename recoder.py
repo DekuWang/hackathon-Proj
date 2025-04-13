@@ -2,15 +2,7 @@ import pyaudio
 import wave
 import numpy as np
 import time
-
-# === Config ===
-THRESHOLD = 80            # Adjust this for your microphone sensitivity
-SILENCE_LIMIT = 2         # Seconds of silence before stopping
-CHUNK = 1024              # Buffer size
-FORMAT = pyaudio.paInt16  # 16-bit PCM
-CHANNELS = 1              # Mono
-RATE = 16000              # 16kHz
-OUTPUT_FILENAME = "output.wav"
+from config import THRESHOLD, SILENCE_LIMIT, CHUNK, FORMAT, CHANNELS, RATE, OUTPUT_FILENAME
 
 def rms(data):
     """Root mean square of audio buffer"""
